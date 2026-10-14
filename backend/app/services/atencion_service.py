@@ -3,7 +3,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.db.session import engine
-from app.schemas.atencion import AtencionCrear
+from app.schemas.atencion import AtencionActualizar, AtencionCrear
 
 
 def crear_atencion(datos: AtencionCrear, usuario_id: int) -> dict:
@@ -154,3 +154,97 @@ def obtener_atenciones() -> list[dict]:
         filas = connection.execute(consulta).mappings().all()
         return [dict(fila) for fila in filas]
 
+
+def actualizar_atencion(
+    atencion_id: int,
+    datos: AtencionActualizar,
+    usuario_actual: dict,
+) -> dict:
+    with engine.begin() as connection:
+        atencion = connection.execute(
+            text("""
+                SELECT id, usuario_id
+                FROM public.atencion
+                WHERE id = :id
+                FOR UPDATE
+            """),
+            {"id": atencion_id},
+        ).mappings().first()
+
+        if atencion is None:
+            raise LookupError("La atención no existe.")
+
+        es_admin = usuario_actual["rol"] == "Admin"
+        es_creador = atencion["usuario_id"] == usuario_actual["id"]
+
+        if not es_admin and not es_creador:
+            raise PermissionError(
+                "Solo puedes modificar tus propias atenciones."
+            )
+
+        diagnostico = connection.execute(
+            text("""
+                SELECT nombre
+                FROM public.diagnostico
+                WHERE id = :id
+                    AND activo = TRUE
+            """),
+            {"id": datos.diagnostico_id},
+        ).mappings().first()
+
+        if diagnostico is None:
+            raise ValueError("El diagnóstico no existe o está inactivo.")
+
+        descripcion = datos.descripcion_diagnostico
+        if descripcion is not None:
+            descripcion = descripcion.strip() or None
+
+        if diagnostico["nombre"].strip().lower() == "otros":
+            if not descripcion:
+                raise ValueError(
+                    "Debes describir el diagnóstico cuando seleccionas Otros."
+                )
+        elif descripcion:
+            raise ValueError(
+                "La descripción adicional solo se permite para el diagnóstico Otros."
+            )
+
+        fila = connection.execute(
+            text("""
+                UPDATE public.atencion
+                SET
+                    saturacion = :saturacion,
+                    frecuencia_cardiaca = :frecuencia_cardiaca,
+                    temperatura = :temperatura,
+                    diagnostico_id = :diagnostico_id,
+                    descripcion_diagnostico = :descripcion_diagnostico,
+                    recomendacion = :recomendacion,
+                    modificado_por = :modificado_por
+                WHERE id = :id
+                RETURNING
+                    id,
+                    estudiante_id,
+                    fecha_hora,
+                    saturacion,
+                    frecuencia_cardiaca,
+                    temperatura,
+                    diagnostico_id,
+                    descripcion_diagnostico,
+                    recomendacion,
+                    usuario_id,
+                    modificado_por,
+                    fecha_modificacion
+            """),
+            {
+                "id": atencion_id,
+                "saturacion": datos.saturacion,
+                "frecuencia_cardiaca": datos.frecuencia_cardiaca,
+                "temperatura": datos.temperatura,
+                "diagnostico_id": datos.diagnostico_id,
+                "descripcion_diagnostico": descripcion,
+                "recomendacion": datos.recomendacion,
+                "modificado_por": usuario_actual["id"],
+            },
+        ).mappings().one()
+
+        return dict(fila)

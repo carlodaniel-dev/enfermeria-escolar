@@ -43,3 +43,19 @@ class AtencionRespuesta(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+
+class AtencionActualizar(BaseModel):
+    saturacion: int | None = Field(ge=0, le=100)
+    frecuencia_cardiaca: int | None = Field(ge=0)
+    temperatura: float | None = Field(ge=0)
+    diagnostico_id: int = Field(gt=0)
+    descripcion_diagnostico: str | None = None
+    recomendacion: str | None = None
+
+    @model_validator(mode="after")
+    def normalizar_descripcion(self):
+        if self.descripcion_diagnostico is not None:
+            self.descripcion_diagnostico = (
+                self.descripcion_diagnostico.strip() or None
+            )
+        return self
