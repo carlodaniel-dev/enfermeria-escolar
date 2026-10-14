@@ -1,0 +1,14 @@
+
+# Variables de entorno y secretos
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Frontend
+node_modules/
+dist/
