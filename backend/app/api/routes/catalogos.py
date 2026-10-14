@@ -1,8 +1,9 @@
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.core.dependencies import obtener_usuario_actual
 from app.db.session import engine
 
 router = APIRouter(
@@ -12,7 +13,9 @@ router = APIRouter(
 
 
 @router.get("")
-def obtener_catalogos():
+def obtener_catalogos(
+    usuario: dict = Depends(obtener_usuario_actual),
+):
     consultas = {
         "cursos": """
             SELECT id, nombre, nivel
@@ -52,8 +55,8 @@ def obtener_catalogos():
 
             return resultado
 
-    except SQLAlchemyError:
+    except SQLAlchemyError as error:
         raise HTTPException(
             status_code=503,
             detail="No fue posible consultar los catálogos.",
-        )
+        ) from error
