@@ -8,6 +8,8 @@ class Settings(BaseSettings):
     DB_NAME: str = "enfermeria_escolar"
     DB_USER: str = "postgres"
     DB_PASSWORD: str
+    JWT_SECRET_KEY: str
+    JWT_ALGORITHM: str = "HS256"
 
     model_config = SettingsConfigDict(
         env_file=".env",
