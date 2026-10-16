@@ -1,0 +1,236 @@
+
+from fastapi.testclient import TestClient
+
+from app.main import app
+
+client = TestClient(app)
+
+
+def test_root():
+    response = client.get("/")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["estado"] == "en funcionamiento"
+
+
+def test_health_check():
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json()["estado"] == "ok"
+
+
+def test_catalogos_sin_token():
+    response = client.get("/api/catalogos")
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == (
+        "No autenticado o token inválido."
+    )
+
+
+def test_catalogos_con_token_invalido():
+    response = client.get(
+        "/api/catalogos",
+        headers={"Authorization": "Bearer token-invalido-123"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == (
+        "No autenticado o token inválido."
+    )
+
+
+def test_login_correcto(monkeypatch):
+    from app.api.routes import auth
+
+    usuario_falso = {
+        "access_token": "token-de-prueba",
+        "token_type": "bearer",
+        "usuario_id": 1,
+        "nombre": "Administrador de prueba",
+        "email": "admin@enfermeria.local",
+        "rol": "Admin",
+    }
+
+    def autenticar_falso(email, password):
+        return usuario_falso
+
+    monkeypatch.setattr(
+        auth,
+        "autenticar_usuario",
+        autenticar_falso,
+    )
+
+    response = client.post(
+        "/api/auth/login",
+        json={
+            "email": "admin@enfermeria.local",
+            "password": "contraseña-de-prueba",
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["access_token"] == "token-de-prueba"
+    assert data["token_type"] == "bearer"
+    assert data["rol"] == "Admin"
+
+
+def test_login_con_credenciales_incorrectas(monkeypatch):
+    from app.api.routes import auth
+
+    def autenticar_falso(email, password):
+        return None
+
+    monkeypatch.setattr(
+        auth,
+        "autenticar_usuario",
+        autenticar_falso,
+    )
+
+    response = client.post(
+        "/api/auth/login",
+        json={
+            "email": "admin@enfermeria.local",
+            "password": "incorrecta",
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == (
+        "Correo o contraseña incorrectos."
+    )
+
+
+def test_login_usuario_inactivo(monkeypatch):
+    from app.api.routes import auth
+
+    def autenticar_falso(email, password):
+        return None
+
+    monkeypatch.setattr(
+        auth,
+        "autenticar_usuario",
+        autenticar_falso,
+    )
+
+    response = client.post(
+        "/api/auth/login",
+        json={
+            "email": "usuario@enfermeria.local",
+            "password": "contraseña-de-prueba",
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == (
+        "Correo o contraseña incorrectos."
+    )
+
+
+def test_modificar_atencion_sin_permisos(monkeypatch):
+    from app.api.routes import atenciones
+
+    def usuario_falso():
+        return {
+            "id": 2,
+            "nombre": "Usuario de prueba",
+            "email": "usuario@enfermeria.local",
+            "rol": "Usuario",
+            "activo": True,
+        }
+
+    def actualizar_falso(**kwargs):
+        raise PermissionError(
+            "Solo puedes modificar tus propias atenciones."
+        )
+
+    monkeypatch.setattr(
+        atenciones,
+        "actualizar_atencion",
+        actualizar_falso,
+    )
+    app.dependency_overrides[
+        atenciones.obtener_usuario_actual
+    ] = usuario_falso
+
+    try:
+        response = client.put(
+            "/api/atenciones/8",
+            json={
+                "saturacion": 98,
+                "frecuencia_cardiaca": 80,
+                "temperatura": 36.5,
+                "diagnostico_id": 1,
+                "descripcion_diagnostico": None,
+                "recomendacion": "Reposo",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == (
+        "Solo puedes modificar tus propias atenciones."
+    )
+
+
+def test_modificar_atencion_inexistente(monkeypatch):
+    from app.api.routes import atenciones
+
+    def usuario_falso():
+        return {
+            "id": 1,
+            "nombre": "Administrador de prueba",
+            "email": "admin@enfermeria.local",
+            "rol": "Admin",
+            "activo": True,
+        }
+
+    def actualizar_falso(**kwargs):
+        raise LookupError("La atención no existe.")
+
+    monkeypatch.setattr(
+        atenciones,
+        "actualizar_atencion",
+        actualizar_falso,
+    )
+    app.dependency_overrides[
+        atenciones.obtener_usuario_actual
+    ] = usuario_falso
+
+    try:
+        response = client.put(
+            "/api/atenciones/999999",
+            json={
+                "saturacion": 98,
+                "frecuencia_cardiaca": 80,
+                "temperatura": 36.5,
+                "diagnostico_id": 1,
+                "descripcion_diagnostico": None,
+                "recomendacion": "Reposo",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "La atención no existe."
+
+
+def test_modificar_atencion_id_no_positivo():
+    response = client.put(
+        "/api/atenciones/0",
+        json={
+            "saturacion": 98,
+            "frecuencia_cardiaca": 80,
+            "temperatura": 36.5,
+            "diagnostico_id": 1,
+            "descripcion_diagnostico": None,
+            "recomendacion": "Reposo",
+        },
+    )
+
+    assert response.status_code == 401
