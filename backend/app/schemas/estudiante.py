@@ -31,6 +31,10 @@ class EstudianteCrear(EstudianteBase):
     pass
 
 
+class EstudianteActualizar(EstudianteBase):
+    pass
+
+
 class EstudianteRespuesta(EstudianteBase):
     id: int
 

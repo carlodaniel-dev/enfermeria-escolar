@@ -234,3 +234,294 @@ def test_modificar_atencion_id_no_positivo():
     )
 
     assert response.status_code == 401
+
+
+def test_auditoria_estudiante_sin_autenticacion():
+    response = client.get(
+        "/api/estudiantes/1/auditoria",
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == (
+        "No autenticado o token inválido."
+    )
+
+
+def test_auditoria_estudiante_usuario_sin_permisos():
+    from app.core.dependencies import exigir_admin, obtener_usuario_actual
+
+    def usuario_falso():
+        return {
+            "id": 2,
+            "nombre": "Usuario de prueba",
+            "email": "usuario@enfermeria.local",
+            "rol": "Usuario",
+            "activo": True,
+        }
+
+    # Simulamos un usuario autenticado con rol Usuario.
+    app.dependency_overrides[obtener_usuario_actual] = usuario_falso
+
+    try:
+        response = client.get(
+            "/api/estudiantes/1/auditoria",
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == (
+        "No tienes permisos para realizar esta acción."
+    )
+
+
+def test_auditoria_estudiante_admin_autorizado(monkeypatch):
+    from app.api.routes import estudiantes
+    from app.core.dependencies import exigir_admin
+
+    auditoria_falsa = {
+        "estudiante_id": 1,
+        "estudiante": "Estudiante de prueba",
+        "modificado_por": 1,
+        "modificado_por_nombre": "Administrador de prueba",
+        "modificado_por_email": "admin@enfermeria.local",
+        "fecha_modificacion": "2026-10-19T10:00:00",
+    }
+
+    def usuario_falso():
+        return {
+            "id": 1,
+            "nombre": "Administrador de prueba",
+            "email": "admin@enfermeria.local",
+            "rol": "Admin",
+            "activo": True,
+        }
+
+    def auditoria_falsa_funcion(estudiante_id):
+        assert estudiante_id == 1
+        return auditoria_falsa
+
+    monkeypatch.setattr(
+        estudiantes,
+        "obtener_auditoria_estudiante",
+        auditoria_falsa_funcion,
+    )
+    app.dependency_overrides[exigir_admin] = usuario_falso
+
+    try:
+        response = client.get(
+            "/api/estudiantes/1/auditoria",
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["estudiante_id"] == 1
+    assert response.json()["modificado_por_nombre"] == (
+        "Administrador de prueba"
+    )
+
+
+def test_auditoria_estudiante_inexistente(monkeypatch):
+    from app.api.routes import estudiantes
+    from app.core.dependencies import exigir_admin
+
+    def usuario_falso():
+        return {
+            "id": 1,
+            "nombre": "Administrador de prueba",
+            "email": "admin@enfermeria.local",
+            "rol": "Admin",
+            "activo": True,
+        }
+
+    def auditoria_falsa_funcion(estudiante_id):
+        raise LookupError("El estudiante no existe.")
+
+    monkeypatch.setattr(
+        estudiantes,
+        "obtener_auditoria_estudiante",
+        auditoria_falsa_funcion,
+    )
+    app.dependency_overrides[exigir_admin] = usuario_falso
+
+    try:
+        response = client.get(
+            "/api/estudiantes/999999/auditoria",
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == (
+        "El estudiante no existe."
+    )
+
+def test_modificar_estudiante_inexistente(monkeypatch):
+    from app.api.routes import estudiantes
+    from app.core.dependencies import obtener_usuario_actual
+
+    def usuario_falso():
+        return {
+            "id": 1,
+            "nombre": "Administrador",
+            "email": "admin@enfermeria.local",
+            "rol": "Admin",
+            "activo": True,
+        }
+
+    def actualizar_falso(**kwargs):
+        raise LookupError("El estudiante no existe.")
+
+    monkeypatch.setattr(
+        estudiantes,
+        "actualizar_estudiante",
+        actualizar_falso,
+    )
+    app.dependency_overrides[obtener_usuario_actual] = usuario_falso
+
+    try:
+        response = client.put(
+            "/api/estudiantes/999999",
+            json={
+                "nombre": "Estudiante de prueba",
+                "curso_id": 12,
+                "paralelo_id": 3,
+                "especialidad_id": None,
+                "sexo": "Masculino",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "El estudiante no existe."
+
+
+def test_modificar_estudiante_curso_inexistente(monkeypatch):
+    from app.api.routes import estudiantes
+    from app.core.dependencies import obtener_usuario_actual
+
+    def usuario_falso():
+        return {
+            "id": 1,
+            "nombre": "Administrador",
+            "email": "admin@enfermeria.local",
+            "rol": "Admin",
+            "activo": True,
+        }
+
+    def actualizar_falso(**kwargs):
+        raise ValueError("El curso seleccionado no existe.")
+
+    monkeypatch.setattr(
+        estudiantes,
+        "actualizar_estudiante",
+        actualizar_falso,
+    )
+    app.dependency_overrides[obtener_usuario_actual] = usuario_falso
+
+    try:
+        response = client.put(
+            "/api/estudiantes/3",
+            json={
+                "nombre": "Estudiante de prueba",
+                "curso_id": 999999,
+                "paralelo_id": 3,
+                "especialidad_id": None,
+                "sexo": "Masculino",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == (
+        "El curso seleccionado no existe."
+    )
+
+
+def test_modificar_estudiante_egb_sin_paralelo(monkeypatch):
+    from app.api.routes import estudiantes
+    from app.core.dependencies import obtener_usuario_actual
+
+    def usuario_falso():
+        return {
+            "id": 1,
+            "nombre": "Administrador",
+            "email": "admin@enfermeria.local",
+            "rol": "Admin",
+            "activo": True,
+        }
+
+    def actualizar_falso(**kwargs):
+        raise ValueError("Inicial y EGB requieren un paralelo.")
+
+    monkeypatch.setattr(
+        estudiantes,
+        "actualizar_estudiante",
+        actualizar_falso,
+    )
+    app.dependency_overrides[obtener_usuario_actual] = usuario_falso
+
+    try:
+        response = client.put(
+            "/api/estudiantes/3",
+            json={
+                "nombre": "Estudiante de prueba",
+                "curso_id": 12,
+                "paralelo_id": None,
+                "especialidad_id": None,
+                "sexo": "Masculino",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == (
+        "Inicial y EGB requieren un paralelo."
+    )
+
+
+def test_modificar_estudiante_bachillerato_sin_especialidad(monkeypatch):
+    from app.api.routes import estudiantes
+    from app.core.dependencies import obtener_usuario_actual
+
+    def usuario_falso():
+        return {
+            "id": 1,
+            "nombre": "Administrador",
+            "email": "admin@enfermeria.local",
+            "rol": "Admin",
+            "activo": True,
+        }
+
+    def actualizar_falso(**kwargs):
+        raise ValueError("Bachillerato requiere una especialidad.")
+
+    monkeypatch.setattr(
+        estudiantes,
+        "actualizar_estudiante",
+        actualizar_falso,
+    )
+    app.dependency_overrides[obtener_usuario_actual] = usuario_falso
+
+    try:
+        response = client.put(
+            "/api/estudiantes/3",
+            json={
+                "nombre": "Estudiante de prueba",
+                "curso_id": 20,
+                "paralelo_id": None,
+                "especialidad_id": None,
+                "sexo": "Masculino",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == (
+        "Bachillerato requiere una especialidad."
+    )
