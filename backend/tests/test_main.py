@@ -1,10 +1,19 @@
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
 
 client = TestClient(app)
 
+@pytest.fixture
+def restaurar_dependencias():
+    dependencias_originales = app.dependency_overrides.copy()
+
+    yield
+
+    app.dependency_overrides.clear()
+    app.dependency_overrides.update(dependencias_originales)
 
 def test_root():
     response = client.get("/")
@@ -130,7 +139,7 @@ def test_login_usuario_inactivo(monkeypatch):
     )
 
 
-def test_modificar_atencion_sin_permisos(monkeypatch):
+def test_modificar_atencion_sin_permisos(monkeypatch, restaurar_dependencias):
     from app.api.routes import atenciones
 
     def usuario_falso():
@@ -156,20 +165,17 @@ def test_modificar_atencion_sin_permisos(monkeypatch):
         atenciones.obtener_usuario_actual
     ] = usuario_falso
 
-    try:
-        response = client.put(
-            "/api/atenciones/8",
-            json={
-                "saturacion": 98,
-                "frecuencia_cardiaca": 80,
-                "temperatura": 36.5,
-                "diagnostico_id": 1,
-                "descripcion_diagnostico": None,
-                "recomendacion": "Reposo",
-            },
-        )
-    finally:
-        app.dependency_overrides.clear()
+    response = client.put(
+        "/api/atenciones/8",
+        json={
+            "saturacion": 98,
+            "frecuencia_cardiaca": 80,
+            "temperatura": 36.5,
+            "diagnostico_id": 1,
+            "descripcion_diagnostico": None,
+            "recomendacion": "Reposo",
+        },
+    )
 
     assert response.status_code == 403
     assert response.json()["detail"] == (
@@ -177,7 +183,7 @@ def test_modificar_atencion_sin_permisos(monkeypatch):
     )
 
 
-def test_modificar_atencion_inexistente(monkeypatch):
+def test_modificar_atencion_inexistente(monkeypatch, restaurar_dependencias):
     from app.api.routes import atenciones
 
     def usuario_falso():
@@ -201,26 +207,36 @@ def test_modificar_atencion_inexistente(monkeypatch):
         atenciones.obtener_usuario_actual
     ] = usuario_falso
 
-    try:
-        response = client.put(
-            "/api/atenciones/999999",
-            json={
-                "saturacion": 98,
-                "frecuencia_cardiaca": 80,
-                "temperatura": 36.5,
-                "diagnostico_id": 1,
-                "descripcion_diagnostico": None,
-                "recomendacion": "Reposo",
-            },
-        )
-    finally:
-        app.dependency_overrides.clear()
+    response = client.put(
+        "/api/atenciones/999999",
+        json={
+            "saturacion": 98,
+            "frecuencia_cardiaca": 80,
+            "temperatura": 36.5,
+            "diagnostico_id": 1,
+            "descripcion_diagnostico": None,
+            "recomendacion": "Reposo",
+        },
+    )
 
     assert response.status_code == 404
     assert response.json()["detail"] == "La atención no existe."
 
 
-def test_modificar_atencion_id_no_positivo():
+def test_modificar_atencion_id_no_positivo(restaurar_dependencias):
+    from app.core.dependencies import obtener_usuario_actual
+
+    def usuario_falso():
+        return {
+            "id": 1,
+            "nombre": "Administrador de prueba",
+            "email": "admin@enfermeria.local",
+            "rol": "Admin",
+            "activo": True,
+        }
+
+    app.dependency_overrides[obtener_usuario_actual] = usuario_falso
+
     response = client.put(
         "/api/atenciones/0",
         json={
@@ -233,8 +249,7 @@ def test_modificar_atencion_id_no_positivo():
         },
     )
 
-    assert response.status_code == 401
-
+    assert response.status_code == 422
 
 def test_auditoria_estudiante_sin_autenticacion():
     response = client.get(
@@ -247,7 +262,7 @@ def test_auditoria_estudiante_sin_autenticacion():
     )
 
 
-def test_auditoria_estudiante_usuario_sin_permisos():
+def test_auditoria_estudiante_usuario_sin_permisos(restaurar_dependencias):
     from app.core.dependencies import exigir_admin, obtener_usuario_actual
 
     def usuario_falso():
@@ -262,12 +277,9 @@ def test_auditoria_estudiante_usuario_sin_permisos():
     # Simulamos un usuario autenticado con rol Usuario.
     app.dependency_overrides[obtener_usuario_actual] = usuario_falso
 
-    try:
-        response = client.get(
-            "/api/estudiantes/1/auditoria",
-        )
-    finally:
-        app.dependency_overrides.clear()
+    response = client.get(
+        "/api/estudiantes/1/auditoria",
+    )
 
     assert response.status_code == 403
     assert response.json()["detail"] == (
@@ -275,7 +287,7 @@ def test_auditoria_estudiante_usuario_sin_permisos():
     )
 
 
-def test_auditoria_estudiante_admin_autorizado(monkeypatch):
+def test_auditoria_estudiante_admin_autorizado(monkeypatch, restaurar_dependencias):
     from app.api.routes import estudiantes
     from app.core.dependencies import exigir_admin
 
@@ -308,12 +320,9 @@ def test_auditoria_estudiante_admin_autorizado(monkeypatch):
     )
     app.dependency_overrides[exigir_admin] = usuario_falso
 
-    try:
-        response = client.get(
-            "/api/estudiantes/1/auditoria",
-        )
-    finally:
-        app.dependency_overrides.clear()
+    response = client.get(
+        "/api/estudiantes/1/auditoria",
+    )
 
     assert response.status_code == 200
     assert response.json()["estudiante_id"] == 1
@@ -322,7 +331,7 @@ def test_auditoria_estudiante_admin_autorizado(monkeypatch):
     )
 
 
-def test_auditoria_estudiante_inexistente(monkeypatch):
+def test_auditoria_estudiante_inexistente(monkeypatch, restaurar_dependencias):
     from app.api.routes import estudiantes
     from app.core.dependencies import exigir_admin
 
@@ -345,19 +354,16 @@ def test_auditoria_estudiante_inexistente(monkeypatch):
     )
     app.dependency_overrides[exigir_admin] = usuario_falso
 
-    try:
-        response = client.get(
-            "/api/estudiantes/999999/auditoria",
-        )
-    finally:
-        app.dependency_overrides.clear()
+    response = client.get(
+        "/api/estudiantes/999999/auditoria",
+    )
 
     assert response.status_code == 404
     assert response.json()["detail"] == (
         "El estudiante no existe."
     )
 
-def test_modificar_estudiante_inexistente(monkeypatch):
+def test_modificar_estudiante_inexistente(monkeypatch, restaurar_dependencias):
     from app.api.routes import estudiantes
     from app.core.dependencies import obtener_usuario_actual
 
@@ -380,25 +386,22 @@ def test_modificar_estudiante_inexistente(monkeypatch):
     )
     app.dependency_overrides[obtener_usuario_actual] = usuario_falso
 
-    try:
-        response = client.put(
-            "/api/estudiantes/999999",
-            json={
-                "nombre": "Estudiante de prueba",
-                "curso_id": 12,
-                "paralelo_id": 3,
-                "especialidad_id": None,
-                "sexo": "Masculino",
-            },
-        )
-    finally:
-        app.dependency_overrides.clear()
+    response = client.put(
+        "/api/estudiantes/999999",
+        json={
+            "nombre": "Estudiante de prueba",
+            "curso_id": 12,
+            "paralelo_id": 3,
+            "especialidad_id": None,
+            "sexo": "Masculino",
+        },
+    )
 
     assert response.status_code == 404
     assert response.json()["detail"] == "El estudiante no existe."
 
 
-def test_modificar_estudiante_curso_inexistente(monkeypatch):
+def test_modificar_estudiante_curso_inexistente(monkeypatch, restaurar_dependencias):
     from app.api.routes import estudiantes
     from app.core.dependencies import obtener_usuario_actual
 
@@ -421,19 +424,16 @@ def test_modificar_estudiante_curso_inexistente(monkeypatch):
     )
     app.dependency_overrides[obtener_usuario_actual] = usuario_falso
 
-    try:
-        response = client.put(
-            "/api/estudiantes/3",
-            json={
-                "nombre": "Estudiante de prueba",
-                "curso_id": 999999,
-                "paralelo_id": 3,
-                "especialidad_id": None,
-                "sexo": "Masculino",
-            },
-        )
-    finally:
-        app.dependency_overrides.clear()
+    response = client.put(
+        "/api/estudiantes/3",
+        json={
+            "nombre": "Estudiante de prueba",
+            "curso_id": 999999,
+            "paralelo_id": 3,
+            "especialidad_id": None,
+            "sexo": "Masculino",
+        },
+    )
 
     assert response.status_code == 422
     assert response.json()["detail"] == (
@@ -441,7 +441,7 @@ def test_modificar_estudiante_curso_inexistente(monkeypatch):
     )
 
 
-def test_modificar_estudiante_egb_sin_paralelo(monkeypatch):
+def test_modificar_estudiante_egb_sin_paralelo(monkeypatch, restaurar_dependencias):
     from app.api.routes import estudiantes
     from app.core.dependencies import obtener_usuario_actual
 
@@ -464,19 +464,16 @@ def test_modificar_estudiante_egb_sin_paralelo(monkeypatch):
     )
     app.dependency_overrides[obtener_usuario_actual] = usuario_falso
 
-    try:
-        response = client.put(
-            "/api/estudiantes/3",
-            json={
-                "nombre": "Estudiante de prueba",
-                "curso_id": 12,
-                "paralelo_id": None,
-                "especialidad_id": None,
-                "sexo": "Masculino",
-            },
-        )
-    finally:
-        app.dependency_overrides.clear()
+    response = client.put(
+        "/api/estudiantes/3",
+        json={
+            "nombre": "Estudiante de prueba",
+            "curso_id": 12,
+            "paralelo_id": None,
+            "especialidad_id": None,
+            "sexo": "Masculino",
+        },
+    )
 
     assert response.status_code == 422
     assert response.json()["detail"] == (
@@ -484,7 +481,7 @@ def test_modificar_estudiante_egb_sin_paralelo(monkeypatch):
     )
 
 
-def test_modificar_estudiante_bachillerato_sin_especialidad(monkeypatch):
+def test_modificar_estudiante_bachillerato_sin_especialidad(monkeypatch, restaurar_dependencias):
     from app.api.routes import estudiantes
     from app.core.dependencies import obtener_usuario_actual
 
@@ -507,19 +504,16 @@ def test_modificar_estudiante_bachillerato_sin_especialidad(monkeypatch):
     )
     app.dependency_overrides[obtener_usuario_actual] = usuario_falso
 
-    try:
-        response = client.put(
-            "/api/estudiantes/3",
-            json={
-                "nombre": "Estudiante de prueba",
-                "curso_id": 20,
-                "paralelo_id": None,
-                "especialidad_id": None,
-                "sexo": "Masculino",
-            },
-        )
-    finally:
-        app.dependency_overrides.clear()
+    response = client.put(
+        "/api/estudiantes/3",
+        json={
+            "nombre": "Estudiante de prueba",
+            "curso_id": 20,
+            "paralelo_id": None,
+            "especialidad_id": None,
+            "sexo": "Masculino",
+        },
+    )
 
     assert response.status_code == 422
     assert response.json()["detail"] == (
