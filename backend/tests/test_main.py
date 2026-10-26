@@ -251,6 +251,7 @@ def test_modificar_atencion_id_no_positivo(restaurar_dependencias):
 
     assert response.status_code == 422
 
+
 def test_auditoria_estudiante_sin_autenticacion():
     response = client.get(
         "/api/estudiantes/1/auditoria",
@@ -362,6 +363,7 @@ def test_auditoria_estudiante_inexistente(monkeypatch, restaurar_dependencias):
     assert response.json()["detail"] == (
         "El estudiante no existe."
     )
+
 
 def test_modificar_estudiante_inexistente(monkeypatch, restaurar_dependencias):
     from app.api.routes import estudiantes
@@ -518,4 +520,210 @@ def test_modificar_estudiante_bachillerato_sin_especialidad(monkeypatch, restaur
     assert response.status_code == 422
     assert response.json()["detail"] == (
         "Bachillerato requiere una especialidad."
+    )
+
+
+def test_exigir_admin_rechaza_usuario_normal():
+    from fastapi import HTTPException
+    from app.core.dependencies import exigir_admin
+
+    usuario = {
+        "id": 2,
+        "nombre": "Usuario de prueba",
+        "email": "usuario@enfermeria.local",
+        "rol": "Usuario",
+        "activo": True,
+    }
+
+    with pytest.raises(HTTPException) as error:
+        exigir_admin(usuario=usuario)
+
+    assert error.value.status_code == 403
+    assert error.value.detail == (
+        "No tienes permisos para realizar esta acción."
+    )
+
+
+def test_exigir_admin_permite_administrador():
+    from app.core.dependencies import exigir_admin
+
+    usuario = {
+        "id": 1,
+        "nombre": "Administrador de prueba",
+        "email": "admin@enfermeria.local",
+        "rol": "Admin",
+        "activo": True,
+    }
+
+    resultado = exigir_admin(usuario=usuario)
+
+    assert resultado == usuario
+
+
+@pytest.mark.parametrize(
+    "usuario",
+    [
+        {
+            "id": 1,
+            "nombre": "Administrador de prueba",
+            "email": "admin@enfermeria.local",
+            "rol": "Admin",
+            "activo": True,
+        },
+        {
+            "id": 2,
+            "nombre": "Usuario de prueba",
+            "email": "usuario@enfermeria.local",
+            "rol": "Usuario",
+            "activo": True,
+        },
+    ],
+    ids=["admin", "usuario"],
+)
+def test_registrar_estudiante_permitido(
+    usuario,
+    monkeypatch,
+    restaurar_dependencias,
+):
+    from app.api.routes import estudiantes
+    from app.core.dependencies import obtener_usuario_actual
+
+    estudiante_falso = {
+        "id": 100,
+        "nombre": "Estudiante de prueba",
+        "curso_id": 12,
+        "paralelo_id": 3,
+        "especialidad_id": None,
+        "sexo": "Masculino",
+    }
+
+    def usuario_falso():
+        return usuario
+
+    def crear_falso(datos):
+        return estudiante_falso
+
+    monkeypatch.setattr(
+        estudiantes,
+        "crear_estudiante",
+        crear_falso,
+    )
+    app.dependency_overrides[obtener_usuario_actual] = usuario_falso
+
+    response = client.post(
+        "/api/estudiantes",
+        json={
+            "nombre": "Estudiante de prueba",
+            "curso_id": 12,
+            "paralelo_id": 3,
+            "especialidad_id": None,
+            "sexo": "Masculino",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["nombre"] == "Estudiante de prueba"
+    assert response.json()["id"] == 100
+
+
+def test_registrar_estudiante_sin_autenticacion():
+    response = client.post(
+        "/api/estudiantes",
+        json={
+            "nombre": "Estudiante de prueba",
+            "curso_id": 12,
+            "paralelo_id": 3,
+            "especialidad_id": None,
+            "sexo": "Masculino",
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == (
+        "No autenticado o token inválido."
+    )
+
+
+@pytest.mark.parametrize(
+    "usuario",
+    [
+        {
+            "id": 1,
+            "nombre": "Administrador de prueba",
+            "email": "admin@enfermeria.local",
+            "rol": "Admin",
+            "activo": True,
+        },
+        {
+            "id": 2,
+            "nombre": "Usuario de prueba",
+            "email": "usuario@enfermeria.local",
+            "rol": "Usuario",
+            "activo": True,
+        },
+    ],
+    ids=["admin", "usuario"],
+)
+def test_modificar_estudiante_permitido(
+    usuario,
+    monkeypatch,
+    restaurar_dependencias,
+):
+    from app.api.routes import estudiantes
+    from app.core.dependencies import obtener_usuario_actual
+
+    estudiante_falso = {
+        "id": 3,
+        "nombre": "Estudiante actualizado",
+        "curso_id": 12,
+        "paralelo_id": 3,
+        "especialidad_id": None,
+        "sexo": "Masculino",
+    }
+
+    def usuario_falso():
+        return usuario
+
+    def actualizar_falso(**kwargs):
+        assert kwargs["estudiante_id"] == 3
+        assert kwargs["usuario_id"] == usuario["id"]
+        return estudiante_falso
+
+    monkeypatch.setattr(
+        estudiantes,
+        "actualizar_estudiante",
+        actualizar_falso,
+    )
+    app.dependency_overrides[obtener_usuario_actual] = usuario_falso
+
+    response = client.put(
+        "/api/estudiantes/3",
+        json={
+            "nombre": "Estudiante actualizado",
+            "curso_id": 12,
+            "paralelo_id": 3,
+            "especialidad_id": None,
+            "sexo": "Masculino",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["nombre"] == "Estudiante actualizado"
+
+
+def test_modificar_estudiante_sin_autenticacion():
+    response = client.put(
+        "/api/estudiantes/3",
+        json={
+            "nombre": "Estudiante actualizado",
+            "curso_id": 12,
+            "paralelo_id": 3,
+            "especialidad_id": None,
+            "sexo": "Masculino",
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == (
+        "No autenticado o token inválido."
     )
