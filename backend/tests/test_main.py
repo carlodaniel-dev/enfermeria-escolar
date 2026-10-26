@@ -727,3 +727,147 @@ def test_modificar_estudiante_sin_autenticacion():
     assert response.json()["detail"] == (
         "No autenticado o token inválido."
     )
+
+
+def test_error_interno_no_expone_detalles():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    app_prueba = FastAPI()
+
+    @app_prueba.get("/error")
+    def provocar_error():
+        raise RuntimeError(
+            "Detalle interno confidencial de prueba"
+        )
+
+    cliente_prueba = TestClient(
+        app_prueba,
+        raise_server_exceptions=False,
+    )
+
+    response = cliente_prueba.get("/error")
+
+    assert response.status_code == 500
+    assert "Detalle interno confidencial de prueba" not in response.text
+    assert "Traceback" not in response.text
+
+
+def test_crear_token_incluye_expiracion():
+    import jwt
+
+    from app.core.config import settings
+    from app.core.security import crear_access_token
+
+    token = crear_access_token("1")
+
+    payload = jwt.decode(
+        token,
+        settings.JWT_SECRET_KEY,
+        algorithms=[settings.JWT_ALGORITHM],
+        options={"require": ["sub", "iat", "exp"]},
+    )
+
+    assert payload["sub"] == "1"
+    assert payload["exp"] > payload["iat"]
+
+
+def test_verificar_token_caducado():
+    from datetime import datetime, timedelta, timezone
+
+    import jwt
+    import pytest
+
+    from app.core.config import settings
+    from app.core.security import verificar_access_token
+
+    ahora = datetime.now(timezone.utc)
+    token = jwt.encode(
+        {
+            "sub": "1",
+            "iat": ahora - timedelta(minutes=10),
+            "exp": ahora - timedelta(minutes=5),
+        },
+        settings.JWT_SECRET_KEY,
+        algorithm=settings.JWT_ALGORITHM,
+    )
+
+    with pytest.raises(jwt.ExpiredSignatureError):
+        verificar_access_token(token)
+
+
+def test_verificar_token_con_firma_invalida():
+    import jwt
+    import pytest
+
+    from app.core.config import settings
+    from app.core.security import verificar_access_token
+
+    token = jwt.encode(
+        {
+            "sub": "1",
+            "iat": 2000000000,
+            "exp": 2100000000,
+        },
+        "clave-falsa-solo-para-pruebas-32-bytes-minimo",
+        algorithm=settings.JWT_ALGORITHM,
+    )
+
+    with pytest.raises(jwt.InvalidTokenError):
+        verificar_access_token(token)
+
+
+
+def test_token_usuario_inactivo_es_rechazado(monkeypatch):
+    from unittest.mock import MagicMock
+
+    import pytest
+    from fastapi import HTTPException
+    from fastapi.security import HTTPAuthorizationCredentials
+
+    from app.core import dependencies
+
+    # Simula un token válido que pertenece al usuario 2.
+    monkeypatch.setattr(
+        dependencies,
+        "verificar_access_token",
+        lambda token: {"sub": "2"},
+    )
+
+    # Simula la respuesta de PostgreSQL: usuario inactivo.
+    resultado = MagicMock()
+    resultado.mappings.return_value.first.return_value = {
+        "id": 2,
+        "nombre": "Usuario",
+        "email": "usuario@enfermeria.local",
+        "rol": "Usuario",
+        "activo": False,
+    }
+
+    conexion = MagicMock()
+    conexion.execute.return_value = resultado
+
+    contexto = MagicMock()
+    contexto.__enter__.return_value = conexion
+    contexto.__exit__.return_value = False
+
+    monkeypatch.setattr(
+        dependencies.engine,
+        "connect",
+        lambda: contexto,
+    )
+
+    credenciales = HTTPAuthorizationCredentials(
+        scheme="Bearer",
+        credentials="token-valido-de-prueba",
+    )
+
+    with pytest.raises(HTTPException) as error:
+        dependencies.obtener_usuario_actual(credenciales)
+
+    assert error.value.status_code == 401
+    assert error.value.detail == (
+        "No autenticado o token inválido."
+    )
+
+    conexion.execute.assert_called_once()

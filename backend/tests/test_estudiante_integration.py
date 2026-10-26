@@ -78,6 +78,7 @@ def estudiante_temporal():
                 )
 
 
+
 def test_crear_actualizar_y_auditar_estudiante(
     estudiante_temporal,
 ):
@@ -120,7 +121,32 @@ def test_crear_actualizar_y_auditar_estudiante(
     assert actualizado["modificado_por"] == 2
     assert actualizado["fecha_modificacion"] is not None
 
-    # 3. Verificar los datos de auditoría.
+    # 3. Verificar directamente los datos guardados en PostgreSQL.
+    with engine.connect() as connection:
+        base_actual = connection.execute(
+            text("SELECT current_database()")
+        ).scalar_one()
+
+        assert base_actual == BASE_DATOS_PRUEBAS
+
+        registro = connection.execute(
+            text("""
+                SELECT
+                    nombre,
+                    modificado_por,
+                    fecha_modificacion
+                FROM public.estudiante
+                WHERE id = :estudiante_id
+            """),
+            {"estudiante_id": estudiante_id},
+        ).mappings().one_or_none()
+
+    assert registro is not None
+    assert registro["nombre"] == datos_actualizados.nombre
+    assert registro["modificado_por"] == 2
+    assert registro["fecha_modificacion"] is not None
+
+    # 4. Verificar los datos de auditoría devueltos por el servicio.
     auditoria = estudiante_service.obtener_auditoria_estudiante(
         estudiante_id
     )
@@ -130,6 +156,7 @@ def test_crear_actualizar_y_auditar_estudiante(
     assert auditoria["modificado_por_nombre"] is not None
     assert auditoria["modificado_por_email"] is not None
     assert auditoria["fecha_modificacion"] is not None
+
 
 def test_trigger_rechaza_bachillerato_sin_especialidad():
     # Protección: verificar la base de datos antes de escribir.
