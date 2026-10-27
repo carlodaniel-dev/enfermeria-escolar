@@ -1,22 +1,27 @@
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Path, status
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.core.dependencies import obtener_usuario_actual
-from app.schemas.atencion import AtencionActualizar, AtencionCrear
+from app.schemas.atencion import (
+    AtencionActualizar,
+    AtencionCrear,
+    AtencionRespuesta,
+)
 from app.services.atencion_service import (
     actualizar_atencion,
     crear_atencion,
     obtener_atenciones,
 )
 
-router = APIRouter(
-    prefix="/atenciones",
-    tags=["Atenciones"],
+router = APIRouter(prefix="/atenciones", tags=["Atenciones"])
+
+
+@router.post(
+    "",
+    status_code=status.HTTP_201_CREATED,
+    response_model=AtencionRespuesta,
 )
-
-
-@router.post("", status_code=status.HTTP_201_CREATED)
 def registrar_atencion(
     datos: AtencionCrear,
     usuario: dict = Depends(obtener_usuario_actual),
@@ -57,18 +62,18 @@ def listar_atenciones(
         ) from error
 
 
-@router.put("/{atencion_id}")
+@router.put(
+    "/{atencion_id}",
+    response_model=AtencionRespuesta,
+)
 def modificar_atencion(
-    atencion_id: int,
-    datos: AtencionActualizar,
+    atencion_id: int = Path(
+        gt=0,
+        description="Identificador positivo de la atención.",
+    ),
+    datos: AtencionActualizar = ...,
     usuario: dict = Depends(obtener_usuario_actual),
 ):
-    if atencion_id <= 0:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="El identificador de la atención debe ser positivo.",
-        )
-
     try:
         return actualizar_atencion(
             atencion_id=atencion_id,

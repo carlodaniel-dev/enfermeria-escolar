@@ -1,10 +1,13 @@
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Path, status
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.core.dependencies import exigir_admin, obtener_usuario_actual
-from app.schemas.estudiante import EstudianteActualizar, EstudianteCrear
-
+from app.schemas.estudiante import (
+    EstudianteActualizar,
+    EstudianteCrear,
+    EstudianteRespuesta,
+)
 from app.services.estudiante_service import (
     actualizar_estudiante,
     crear_estudiante,
@@ -32,7 +35,11 @@ def listar_estudiantes(
         ) from error
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    status_code=status.HTTP_201_CREATED,
+    response_model=EstudianteRespuesta,
+)
 def registrar_estudiante(
     datos: EstudianteCrear,
     usuario: dict = Depends(obtener_usuario_actual),
@@ -62,39 +69,46 @@ def registrar_estudiante(
         ) from error
 
 
-@router.put("/{estudiante_id}")
+@router.put(
+    "/{estudiante_id}",
+    response_model=EstudianteRespuesta,
+)
 def modificar_estudiante(
-    estudiante_id: int,
     datos: EstudianteActualizar,
+    estudiante_id: int = Path(
+        gt=0,
+        description="Identificador positivo del estudiante.",
+    ),
     usuario: dict = Depends(obtener_usuario_actual),
 ):
-    if estudiante_id <= 0:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="El ID del estudiante debe ser positivo.",
-        )
-
     try:
         return actualizar_estudiante(
             estudiante_id=estudiante_id,
             datos=datos,
             usuario_id=usuario["id"],
         )
+
     except LookupError as error:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(error),
         ) from error
+
     except ValueError as error:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(error),
         ) from error
+
     except IntegrityError as error:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="No se pudo modificar el estudiante. Verifica los datos relacionados.",
+            detail=(
+                "No se pudo modificar el estudiante. "
+                "Verifica los datos relacionados."
+            ),
         ) from error
+
     except SQLAlchemyError as error:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -104,22 +118,21 @@ def modificar_estudiante(
 
 @router.get("/{estudiante_id}/auditoria")
 def consultar_auditoria_estudiante(
-    estudiante_id: int,
+    estudiante_id: int = Path(
+        gt=0,
+        description="Identificador positivo del estudiante.",
+    ),
     usuario: dict = Depends(exigir_admin),
 ):
-    if estudiante_id <= 0:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="El ID del estudiante debe ser positivo.",
-        )
-
     try:
         return obtener_auditoria_estudiante(estudiante_id)
+
     except LookupError as error:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(error),
         ) from error
+
     except SQLAlchemyError as error:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

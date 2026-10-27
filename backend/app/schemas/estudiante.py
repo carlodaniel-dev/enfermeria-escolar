@@ -7,8 +7,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 class EstudianteBase(BaseModel):
     nombre: str = Field(min_length=1, max_length=150)
     curso_id: int = Field(gt=0)
-    paralelo_id: int | None = None
-    especialidad_id: int | None = None
+    paralelo_id: int | None = Field(default=None, gt=0)
+    especialidad_id: int | None = Field(default=None, gt=0)
     sexo: Literal["Masculino", "Femenino"]
 
     @model_validator(mode="after")
