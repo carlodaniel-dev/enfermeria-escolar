@@ -1,11 +1,7 @@
 
-from datetime import datetime, timedelta, timezone
-
-import jwt
 from sqlalchemy import text
 
-from app.core.config import settings
-from app.core.security import verify_password
+from app.core.security import crear_access_token, verify_password
 from app.db.session import engine
 
 
@@ -37,18 +33,7 @@ def autenticar_usuario(email: str, password: str) -> dict | None:
     if not verify_password(password, usuario["password_hash"]):
         return None
 
-    ahora = datetime.now(timezone.utc)
-    expiracion = ahora + timedelta(minutes=30)
-
-    token = jwt.encode(
-        {
-            "sub": str(usuario["id"]),
-            "iat": ahora,
-            "exp": expiracion,
-        },
-        settings.JWT_SECRET_KEY,
-        algorithm=settings.JWT_ALGORITHM,
-    )
+    token = crear_access_token(subject=str(usuario["id"]))
 
     return {
         "access_token": token,

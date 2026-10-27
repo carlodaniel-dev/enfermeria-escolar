@@ -7,6 +7,7 @@ import jwt
 from app.core.config import settings
 from app.core.security import verificar_access_token
 from app.db.session import engine
+from sqlalchemy.exc import SQLAlchemyError
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -39,15 +40,22 @@ def obtener_usuario_actual(
     except (jwt.InvalidTokenError, ValueError, TypeError):
         raise error
 
-    with engine.connect() as connection:
-        usuario = connection.execute(
-            text("""
-                SELECT id, nombre, email, rol, activo
-                FROM usuario
-                WHERE id = :usuario_id
-            """),
-            {"usuario_id": usuario_id},
-        ).mappings().first()
+    try:
+        with engine.connect() as connection:
+            usuario = connection.execute(
+                text("""
+                    SELECT id, nombre, email, rol, activo
+                    FROM usuario
+                    WHERE id = :usuario_id
+                """),
+                {"usuario_id": usuario_id},
+            ).mappings().first()
+
+    except SQLAlchemyError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="No fue posible verificar la autenticación.",
+        ) from error
 
     if usuario is None or not usuario["activo"]:
         raise error
